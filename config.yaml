@@ -1,0 +1,16 @@
+es:
+  host: http://10.6.4.227/elasticsearch
+  index: hpi-sandbox-*
+
+swift:
+  auth_version: 3
+  os_username: os_username
+  os_password: os_password
+  os_user_domain_name: default
+  os_project_name: os_project_name
+  os_project_domain_name: default
+  os_auth_url: https://swift/v3
+  temp_url_key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  insecure: True
+  object_uu_threads: 20
+  container: doc-report-dev
