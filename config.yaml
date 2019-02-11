@@ -1,3 +1,13 @@
+main:
+  timezone: Europe/Kiev
+  temp_dir_name: ds_reports  # will be created in your system temp folder unless "directory" is specified
+#  directory: /Users/Optima/Projects/ds_reports/data # use this for a specific folder
+
+sign_api:
+  sign_file_url: http://localhost:6543/sign/file
+  username: test
+  password: test
+
 es:
   host: http://10.6.4.227/elasticsearch
   index: hpi-sandbox-*
@@ -13,4 +23,40 @@ swift:
   temp_url_key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   insecure: True
   object_uu_threads: 20
-  container: doc-report-dev
+  container_prefix: doc-report-dev
+
+email:
+  smtp_server: mail.dc.prozorro.gov.ua
+  smtp_port: 25
+  verified_email: blablabla@prozorro.ua
+  use_tls: false
+  use_auth: false
+  username: ""
+  password: ""
+
+
+brokers_emails:
+  test.quintagroup.com: blablav@gmail.com
+  netcast.com.ua:
+    - blablav@gmail.com
+    - whatisit@gmail.com
+
+logging:
+  version: 1
+  formatters:
+    default:
+      class: logging.Formatter
+      format: "%(asctime)s %(levelname)-8s %(message)s"
+  handlers:
+    console:
+      class: logging.StreamHandler
+      formatter: default
+      level: DEBUG
+  loggers:
+    "":
+      handlers: [console]
+      level: INFO
+    DocReportsLogger:
+      handlers: [console]
+      propagate: no
+      level: INFO

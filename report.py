@@ -1,221 +1,211 @@
 #!/usr/local/bin/python
-from swiftclient.service import SwiftService, SwiftUploadObject, Connection
-from swiftclient.utils import generate_temp_url
+from utils import (
+    send_mail,
+    get_swift_connection,
+    get_files_from_swift_container,
+    get_doc_logs_from_es,
+    ensure_dir_exists,
+    ReportFilesManager,
+    upload_files_to_swift,
+)
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
-from time import sleep, time
+import tempfile
 import argparse
 import urllib3
 import logging
+import logging.config
 import requests
+import zipfile
 import shutil
-import json
 import pytz
 import yaml
 import os
+import re
+
 
 urllib3.disable_warnings()
-
 logger = logging.getLogger("DocReportsLogger")
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
-
-WORK_DIR = "."
-FIELDS = ["USER", "REMOTE_ADDR", "DOC_ID", "DOC_HASH", "TIMESTAMP", "@timestamp", "HOSTNAME"]
 
 
-def get_doc_logs(es_host, es_index, start, end, limit=1000, wait_sec=10):
-    total = 1
-    offset = 0
-
-    while offset < total:
-        total = 0
-        request_body = (
-            {
-                "index": [es_index],
-            },
-            {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"match_phrase": {"MESSAGE_ID": {"query": "uploaded_document"}}},
-                            {"range": {"@timestamp": {
-                                "gte": int(start.timestamp() * 1000),
-                                "lte": int(end.timestamp() * 1000),
-                                "format": "epoch_millis"
-                            }}}
-                        ],
-                    }
-                },
-                "from": offset,
-                "size": limit,
-                "sort": [{"@timestamp": {"order": "asc", "unmapped_type": "boolean"}}],
-                "_source": {"includes": FIELDS},
-            }
-        )
-        headers = {
-            "kbn-version": "5.6.2",
-        }
-        response = requests.post("{}/_msearch".format(es_host),
-                                 data="\n".join(json.dumps(e) for e in request_body) + "\n",
-                                 headers=headers)
-        if response.status_code != 200:
-            logger.error("Unexpected response {}:{}".format(response.status_code, response.text))
-            sleep(wait_sec)
-            continue
-        else:
-            resp_json = response.json()
-            response = resp_json["responses"][0]
-            hits = response["hits"]
-            total = hits["total"]
-            logger.info(
-                "Got {} hits from total {} with offset {}: from {} to {}".format(
-                    len(hits["hits"]), total, offset,
-                    hits["hits"][0]["_source"]["TIMESTAMP"],
-                    hits["hits"][-1]["_source"]["TIMESTAMP"]
-                )
-            )
-            offset += limit
-            yield from hits["hits"]
-
-
-class ReportFilesManager:
-
-    def __init__(self, directory, fields=None):
-        self.directory = directory
-        self.descriptors = {}
-        self.fields = fields or ("TIMESTAMP", "DOC_ID", "DOC_HASH", "REMOTE_ADDR")
-
-        if not os.path.exists(self.directory):
-            os.makedirs(self.directory)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        logger.info("Closing files..")
-        for d in self.descriptors.values():
-            try:
-                d.close()
-            except IOError as e:
-                logger.exception(e)
-
-    def write(self, data):
-        file_name = "{}.csv".format(data["USER"])
-        if file_name not in self.descriptors:
-            full_name = os.path.join(self.directory, file_name)
-            logger.info("New report file {}".format(full_name))
-            if os.path.exists(full_name):
-                logger.info("Removing stale data from {}".format(full_name))
-
-            report_file = open(full_name, "a")
-            report_file.write(",".join(k for k in self.fields) + "\n")
-
-            self.descriptors[file_name] = report_file
-        else:
-            report_file = self.descriptors[file_name]
-
-        report_file.write(
-            ",".join(data[k] for k in self.fields) + "\n"
-        )
-
-
-def generate_temp_report_url(account, container, key, temp_url_key, expires=60*60*48):
-    full_path = "/v1/{}/{}/{}".format(account, container, key)
-    url = generate_temp_url(
-        full_path,
-        int(time() + int(expires)),
-        temp_url_key,
-        'GET'
-    )
-    return url
-
-
-def get_swift_details(options):
-    connection = Connection(
-        authurl=options["os_auth_url"],
-        auth_version=options["auth_version"],
-        user=options["os_username"],
-        key=options["os_password"],
-        os_options={
-            'user_domain_name': options["os_user_domain_name"],
-            'project_domain_name': options["os_project_domain_name"],
-            'project_name': options["os_project_name"]
-        },
-        insecure=options["insecure"]
-    )
-    storage_url, _ = connection.get_auth()
-    parsed_url = urlparse(storage_url)
-    storage_host = "{}://{}".format(parsed_url.scheme, parsed_url.netloc)
-    account = urlparse(storage_url).path.split("/")[-1]
-
-    return storage_host, account
-
-
-def upload_to_swift(directory, swift_config):
-    upload_objects = []
-    for name in os.listdir(directory):
-        full_name = os.path.join(directory, name)
-        if os.path.isfile(full_name):
-            upload_objects.append(
-                SwiftUploadObject(
-                    full_name,
-                    object_name=full_name.replace(
-                        directory + '/', '', 1
-                    )
-                )
-            )
-
-    storage_host, account = get_swift_details(swift_config)
-    links = []
-    with SwiftService(options=swift_config) as swift:
-        for r in swift.upload(swift_config["container"], upload_objects):
-            if r['success']:
-                if 'object' in r:
-                    link = generate_temp_report_url(account, swift_config["container"],
-                                                    r['object'], swift_config["temp_url_key"])
-                    links.append("".join((storage_host, link)))
-            else:
-                logger.error(r)
-    return links
-
-
-def main():
+def get_config():
     parser = argparse.ArgumentParser(description="Openprocurement Billing")
     parser.add_argument('-c', '--config', required=True)
+    parser.add_argument('-f', '--send_from')
+    parser.add_argument('-t', '--send_to')
     args = parser.parse_args()
     with open(args.config) as f:
         config = yaml.load(f)
 
-    now = datetime.now(tz=pytz.timezone("Europe/Kiev"))
+    logging.config.dictConfig(config["logging"])
+
+    # dates for report logs
+    current_timezone = config["main"].get("timezone", "Europe/Kiev")
+    now = datetime.now(tz=pytz.timezone(current_timezone))
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = today - timedelta(days=1)
     end = today - timedelta(seconds=1)
-    logger.info("Report time range: {} - {}".format(start, end))
+    config["main"]["start"] = start
+    config["main"]["end"] = end
 
-    directory = os.path.join(WORK_DIR, str(start.date()))
+    # get the dates to save report for
+    send_to = (today.replace(day=1) - timedelta(seconds=1)).date()
+    send_from = send_to.replace(day=1)
+    if args.send_to:
+        send_to = datetime.strptime(args.send_to, "%Y-%m-%d").date()
+        if not args.send_from:
+            # set the beginning of the month
+            send_from = send_to.replace(day=1)
+    if args.send_from:
+        send_from = datetime.strptime(args.send_from, "%Y-%m-%d").date()
+        if not args.send_to:
+            # set the end of the month
+            send_to = (send_from.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    assert send_to > send_from, "Valid time interval"
+    assert send_to.year == send_from.year and send_to.month == send_from.month, "Send reports within a month!"
+    config["main"]["send_from"] = send_from
+    config["main"]["send_to"] = send_to
+    config["main"]["send_month"] = str(send_from)[:7]
+
+    # data containers
+    if config["main"].get("directory") is None:
+        config["main"]["directory"] = os.path.join(
+            tempfile.gettempdir(),
+            config["main"]["temp_dir_name"]
+        )
+    if config["swift"].get("put_container") is None:
+        config["swift"]["put_container"] = "{}-{}".format(
+            config["swift"]["container_prefix"], str(start.date())[:7]
+        )
+    if config["swift"].get("get_container") is None:
+        config["swift"]["get_container"] = "{}-{}".format(
+            config["swift"]["container_prefix"], config["main"]["send_month"]
+        )
+    return config
+
+
+def prepare_reports():
+    config = get_config()
+    main_config = config["main"]
+    logger.info("Report time range: {} - {}".format(main_config["start"], main_config["end"]))
 
     # fill the directory with report files
     es_host, es_index = config["es"]["host"], config["es"]["index"]
-    with ReportFilesManager(directory) as rf_manager:
-        for hit in get_doc_logs(es_host, es_index, start, end):
+    with ReportFilesManager(main_config["directory"], str(main_config["start"].date())) as rf_manager:
+        for hit in get_doc_logs_from_es(es_host, es_index, main_config["start"], main_config["end"]):
             rf_manager.write(hit["_source"])
 
-    # TODO: add signing here
+    sign_reports_from_tmp_and_send()
 
-    # upload to swift
-    links = upload_to_swift(directory, config["swift"])
 
-    # cleanup
-    shutil.rmtree(directory)
+def sign_reports_from_tmp_and_send(config=None):
+    config = config or get_config()
+    directory = config["main"]["directory"]
 
-    # TODO: add sending of these links
-    for link in links:
-        print(link)
+    if os.path.isdir(directory):
+        upload_zip_files = set()
+        logger.info("Looking for csv files in {}".format(directory))
+        for name in os.listdir(directory):
+            file_name = os.path.join(directory, name)
+            if os.path.isfile(file_name):
+                if name.endswith(".csv"):
+                    zip_file_name = sign_and_zip_file(file_name, config["sign_api"])
+                    if zip_file_name:
+                        upload_zip_files.add(zip_file_name)
+                elif name.endswith(".zip"):
+                    upload_zip_files.add(file_name)
+
+        for file_path in upload_files_to_swift(upload_zip_files, config["swift"]):
+            os.remove(file_path)  # file is uploaded
+
+    else:
+        logger.info("{} not found".format(directory))
+
+
+def sign_and_zip_file(file_name, sign_api_config):
+    zip_file_name = "{}.zip".format(file_name[:-4])
+    sign_file_name = "{}.p7s".format(file_name)
+
+    if not os.path.isfile(zip_file_name):
+        if not os.path.isfile(sign_file_name):
+            try:
+                response = requests.post(
+                    sign_api_config["sign_file_url"],
+                    files=dict(file=open(file_name)),
+                    auth=(sign_api_config["username"], sign_api_config["password"]),
+                )
+            except requests.exceptions.RequestException as e:
+                logger.exception(e)
+                return
+            else:
+                if response.status_code != 200:
+                    logger.error(
+                        "Signing has failed: {} {}".format(response.status_code, response.text)
+                    )
+                    return
+
+                with open(sign_file_name, "wb") as f:
+                    f.write(response.content)
+
+        # zipping two files in a single .zip
+        with zipfile.ZipFile(zip_file_name, "w") as zip:
+            with zip.open(file_name.split("/")[-1], "w") as f:
+                f.write(open(file_name, "rb").read())
+            with zip.open(sign_file_name.split("/")[-1], "w") as f:
+                f.write(open(sign_file_name, "rb").read())
+
+    # removing initial files
+    os.remove(file_name)
+    if os.path.isfile(sign_file_name):
+        os.remove(sign_file_name)
+
+    return zip_file_name
+
+
+FILE_REGEX = re.compile(r"(?P<broker>.*)-(?P<date>\d{4}-\d{2}-\d{2})\.zip")
+
+
+def send_reports():
+    config = get_config()
+    main_config = config["main"]
+    send_from, send_to = str(main_config["send_from"]), str(main_config["send_to"])
+    logger.info("Send reports: {} - {}".format(send_from, send_to))
+
+    options = config["swift"]
+    connection = get_swift_connection(options)
+    files = get_files_from_swift_container(connection, options["get_container"])
+    if files:
+        with tempfile.TemporaryDirectory(prefix="send_data_", dir=config["main"]["directory"]) as tmp_dir:
+            # get reports
+            for data in files:
+                match = FILE_REGEX.match(data["name"])
+                if match:
+                    if send_from <= match.group("date") <= send_to:
+                        _, file_data = connection.get_object(options["get_container"], data["name"])
+                        broker_dir_name = os.path.join(tmp_dir, match.group("broker"))
+                        ensure_dir_exists(broker_dir_name)
+                        with open(os.path.join(broker_dir_name, data["name"]), 'wb') as f:
+                            f.write(file_data)
+
+            # zip reports and send emails
+            brokers_emails = config["brokers_emails"]
+            for name in os.listdir(tmp_dir):
+                full_name = os.path.join(tmp_dir, name)
+                if os.path.isdir(full_name):
+                    if name in brokers_emails:
+                        archive_name = "{}-{}".format(full_name, main_config["send_month"])
+                        shutil.make_archive(archive_name, 'zip', full_name)
+                        send_mail(
+                            to=brokers_emails[name],
+                            config=config["email"],
+                            subject="DS Uploads Report for {}".format(main_config["send_month"]),
+                            file_name="{}.zip".format(archive_name)
+                        )
+                        logger.info("Email is sent to {}".format(name))
+                    else:
+                        logger.warning("Email address not found for {}".format(name))
 
 
 if __name__ == "__main__":
-    main()
+    prepare_reports()
+    # sign_reports_from_tmp_and_send()
+    send_reports()

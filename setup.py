@@ -13,7 +13,9 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'build_report=report:main',
+            'prepare_reports=report:prepare_reports',
+            'sign_reports_from_tmp_and_send=report:sign_reports_from_tmp_and_send',
+            'send_reports=report:send_reports',
         ],
     },
     package_data={'': ['config.yaml']},
