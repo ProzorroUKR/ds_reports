@@ -1,5 +1,5 @@
 #!/usr/local/bin/python
-from utils import (
+from .utils import (
     send_mail,
     get_swift_connection,
     get_files_from_swift_container,
@@ -28,7 +28,7 @@ logger = logging.getLogger("DocReportsLogger")
 
 
 def get_config():
-    parser = argparse.ArgumentParser(description="Openprocurement Billing")
+    parser = argparse.ArgumentParser(description="Reports from Document Service logs")
     parser.add_argument('-c', '--config', required=True)
     parser.add_argument('-f', '--send_from')
     parser.add_argument('-t', '--send_to')

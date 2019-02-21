@@ -1,9 +1,9 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
-    name="ds_reports",
-    version="0.1",
-    packages=find_packages(),
+    name='ds_reports',
+    version='0.1.1',
+    packages=['ds_reports'],
     install_requires=[
         'python-swiftclient==3.6.0',
         'python-keystoneclient==3.18.0',
@@ -13,10 +13,9 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'prepare_reports=report:prepare_reports',
-            'sign_reports_from_tmp_and_send=report:sign_reports_from_tmp_and_send',
-            'send_reports=report:send_reports',
+            'prepare_reports=ds_reports.report:prepare_reports',
+            'sign_reports_from_tmp_and_send=ds_reports.report:sign_reports_from_tmp_and_send',
+            'send_reports=ds_reports.report:send_reports',
         ],
     },
-    package_data={'': ['config.yaml']},
 )
