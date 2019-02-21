@@ -129,7 +129,7 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
             }
         )
         headers = {
-            "kbn-version": "5.6.2",
+            "Content-Type": "application/json",
         }
         response = requests.post("{}/_msearch".format(es_host),
                                  data="\n".join(json.dumps(e) for e in request_body) + "\n",

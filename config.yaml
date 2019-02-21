@@ -9,7 +9,7 @@ sign_api:
   password: test
 
 es:
-  host: http://10.6.4.227/elasticsearch
+  host: http://10.6.4.227:9200
   index: hpi-sandbox-*
 
 swift:
