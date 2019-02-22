@@ -1,0 +1,14 @@
+stages:
+  - test
+  - push image
+
+test:
+  image: python:3.6
+  script:
+    - pip install -r requirements.txt
+    - pip install coverage
+    - coverage run --source=. -m unittest discover
+    - coverage html
+    - mv htmlcov/ public/
+    - coverage report
+  coverage: '/TOTAL.+ ([0-9]{1,3}%)/'
