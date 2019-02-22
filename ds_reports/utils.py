@@ -20,9 +20,7 @@ def send_mail(to, config, subject, file_name):
 
     msg = MIMEMultipart()
     msg['From'] = config["verified_email"]
-    if isinstance(to, list):
-        to = COMMASPACE.join(to)
-    msg['To'] = to
+    msg['To'] = COMMASPACE.join(to) if isinstance(to, list) else to
     msg['Date'] = formatdate(localtime=True)
     msg['Subject'] = subject
 
