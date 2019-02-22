@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='ds_reports',
-    version='0.1.1',
+    version='0.1.3',
     packages=['ds_reports'],
     install_requires=[
         'python-swiftclient==3.6.0',
