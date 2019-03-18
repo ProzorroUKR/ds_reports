@@ -7,6 +7,7 @@ from .utils import (
     ensure_dir_exists,
     ReportFilesManager,
     upload_files_to_swift,
+    DirectoryLock,
 )
 from datetime import datetime, timedelta
 import tempfile
@@ -86,19 +87,20 @@ def get_config():
 def prepare_reports():
     config = get_config()
     main_config = config["main"]
-    logger.info("Report time range: {} - {}".format(main_config["start"], main_config["end"]))
 
-    # fill the directory with report files
-    es_host, es_index = config["es"]["host"], config["es"]["index"]
-    with ReportFilesManager(main_config["directory"], str(main_config["start"].date())) as rf_manager:
-        for hit in get_doc_logs_from_es(es_host, es_index, main_config["start"], main_config["end"]):
-            rf_manager.write(hit["_source"])
+    with DirectoryLock(main_config["directory"]):
+        logger.info("Report time range: {} - {}".format(main_config["start"], main_config["end"]))
 
-    sign_reports_from_tmp_and_send()
+        # fill the directory with report files
+        es_host, es_index = config["es"]["host"], config["es"]["index"]
+        with ReportFilesManager(main_config["directory"], str(main_config["start"].date())) as rf_manager:
+            for hit in get_doc_logs_from_es(es_host, es_index, main_config["start"], main_config["end"]):
+                rf_manager.write(hit["_source"])
+
+        _sign_reports_from_tmp_and_send(config)
 
 
-def sign_reports_from_tmp_and_send(config=None):
-    config = config or get_config()
+def _sign_reports_from_tmp_and_send(config):
     directory = config["main"]["directory"]
 
     if os.path.isdir(directory):
@@ -119,6 +121,14 @@ def sign_reports_from_tmp_and_send(config=None):
 
     else:
         logger.info("{} not found".format(directory))
+
+
+def sign_reports_from_tmp_and_send():
+    config = get_config()
+    directory = config["main"]["directory"]
+
+    with DirectoryLock(directory):
+        _sign_reports_from_tmp_and_send(config)
 
 
 def sign_and_zip_file(file_name, sign_api_config):
@@ -167,42 +177,44 @@ FILE_REGEX = re.compile(r"(?P<broker>.*)-(?P<date>\d{4}-\d{2}-\d{2})\.zip")
 def send_reports():
     config = get_config()
     main_config = config["main"]
-    send_from, send_to = str(main_config["send_from"]), str(main_config["send_to"])
-    logger.info("Send reports: {} - {}".format(send_from, send_to))
 
-    options = config["swift"]
-    connection = get_swift_connection(options)
-    files = get_files_from_swift_container(connection, options["get_container"])
-    if files:
-        with tempfile.TemporaryDirectory(prefix="send_data_", dir=config["main"]["directory"]) as tmp_dir:
-            # get reports
-            for data in files:
-                match = FILE_REGEX.match(data["name"])
-                if match:
-                    if send_from <= match.group("date") <= send_to:
-                        _, file_data = connection.get_object(options["get_container"], data["name"])
-                        broker_dir_name = os.path.join(tmp_dir, match.group("broker"))
-                        ensure_dir_exists(broker_dir_name)
-                        with open(os.path.join(broker_dir_name, data["name"]), 'wb') as f:
-                            f.write(file_data)
+    with DirectoryLock(main_config["directory"]):
+        send_from, send_to = str(main_config["send_from"]), str(main_config["send_to"])
+        logger.info("Send reports: {} - {}".format(send_from, send_to))
 
-            # zip reports and send emails
-            brokers_emails = config["brokers_emails"]
-            for name in os.listdir(tmp_dir):
-                full_name = os.path.join(tmp_dir, name)
-                if os.path.isdir(full_name):
-                    if name in brokers_emails:
-                        archive_name = "{}-{}".format(full_name, main_config["send_month"])
-                        shutil.make_archive(archive_name, 'zip', full_name)
-                        send_mail(
-                            to=brokers_emails[name],
-                            config=config["email"],
-                            subject="DS Uploads Report for {}".format(main_config["send_month"]),
-                            file_name="{}.zip".format(archive_name)
-                        )
-                        logger.info("Email is sent to {}".format(name))
-                    else:
-                        logger.warning("Email address not found for {}".format(name))
+        options = config["swift"]
+        connection = get_swift_connection(options)
+        files = get_files_from_swift_container(connection, options["get_container"])
+        if files:
+            with tempfile.TemporaryDirectory(prefix="send_data_", dir=main_config["directory"]) as tmp_dir:
+                # get reports
+                for data in files:
+                    match = FILE_REGEX.match(data["name"])
+                    if match:
+                        if send_from <= match.group("date") <= send_to:
+                            _, file_data = connection.get_object(options["get_container"], data["name"])
+                            broker_dir_name = os.path.join(tmp_dir, match.group("broker"))
+                            ensure_dir_exists(broker_dir_name)
+                            with open(os.path.join(broker_dir_name, data["name"]), 'wb') as f:
+                                f.write(file_data)
+
+                # zip reports and send emails
+                brokers_emails = config["brokers_emails"]
+                for name in os.listdir(tmp_dir):
+                    full_name = os.path.join(tmp_dir, name)
+                    if os.path.isdir(full_name):
+                        if name in brokers_emails:
+                            archive_name = "{}-{}".format(full_name, main_config["send_month"])
+                            shutil.make_archive(archive_name, 'zip', full_name)
+                            send_mail(
+                                to=brokers_emails[name],
+                                config=config["email"],
+                                subject="DS Uploads Report for {}".format(main_config["send_month"]),
+                                file_name="{}.zip".format(archive_name)
+                            )
+                            logger.info("Email is sent to {}".format(name))
+                        else:
+                            logger.warning("Email address not found for {}".format(name))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from email.mime.text import MIMEText
 from email.utils import formatdate, COMMASPACE
 from swiftclient.service import SwiftService, SwiftUploadObject, Connection
 from swiftclient.exceptions import ClientException
+from datetime import datetime, timedelta
 from os.path import basename
 from time import sleep
 import logging
@@ -197,3 +198,33 @@ class ReportFilesManager:
         report_file.write(
             ",".join(data[k] for k in self.fields) + "\n"
         )
+
+
+class DirectoryLock:
+
+    file_name = "ds_reports.lock"
+
+    def __init__(self, directory, timeout=0, retry_interval=10):
+        ensure_dir_exists(directory)
+        self.directory = directory
+        self.lock_file = os.path.join(self.directory, self.file_name)
+        self.created_at = datetime.now()
+        self.timeout = timedelta(seconds=timeout)
+        self.retry_interval = retry_interval
+        self.locked_message = "{} is locked".format(self.directory)
+
+    def __enter__(self):
+        while os.path.exists(self.lock_file):
+            logger.warning(self.locked_message)
+            if datetime.now() - self.created_at < self.timeout:
+                sleep(self.retry_interval)
+            else:
+                raise IOError(self.locked_message)
+
+        logger.info("Setting lock")
+        open(self.lock_file, 'a').close()
+        return self
+
+    def __exit__(self, *args):
+        logger.info("Releasing lock")
+        os.remove(self.lock_file)
