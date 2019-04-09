@@ -97,11 +97,9 @@ def upload_files_to_swift(files, config):
 
 
 def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10):
-    total = 1
-    offset = 0
+    search_after = None
 
-    while offset < total:
-        total = 0
+    while True:
         request_body = (
             {
                 "index": [es_index],
@@ -119,7 +117,6 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                         ],
                     }
                 },
-                "from": offset,
                 "size": limit,
                 "sort": [{"@timestamp": {"order": "asc", "unmapped_type": "boolean"}}],
                 "_source": {"includes": [
@@ -127,12 +124,11 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                 ]},
             }
         )
-        headers = {
-            "Content-Type": "application/json",
-        }
+        if search_after:
+            request_body[1]["search_after"] = search_after
         response = requests.post("{}/_msearch".format(es_host),
                                  data="\n".join(json.dumps(e) for e in request_body) + "\n",
-                                 headers=headers)
+                                 headers={"Content-Type": "application/json"})
         if response.status_code != 200:
             logger.error("Unexpected response {}:{}".format(response.status_code, response.text))
             sleep(wait_sec)
@@ -140,17 +136,23 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
         else:
             resp_json = response.json()
             response = resp_json["responses"][0]
-            hits = response["hits"]
-            total = hits["total"]
+            if response.get("error"):
+                raise RuntimeError("ES error response: {}".format(response.get("error")))
+
+            hits = response["hits"]["hits"]
+            if not hits:
+                break
+
             logger.info(
-                "Got {} hits from total {} with offset {}: from {} to {}".format(
-                    len(hits["hits"]), total, offset,
-                    hits["hits"][0]["_source"]["TIMESTAMP"],
-                    hits["hits"][-1]["_source"]["TIMESTAMP"]
+                "Got {} hits after {}: from {} to {}".format(
+                    len(hits),
+                    search_after,
+                    hits[0]["_source"]["TIMESTAMP"],
+                    hits[-1]["_source"]["TIMESTAMP"]
                 )
             )
-            offset += limit
-            yield from hits["hits"]
+            search_after = hits[-1]["sort"]
+            yield from hits
 
 
 def ensure_dir_exists(name):
