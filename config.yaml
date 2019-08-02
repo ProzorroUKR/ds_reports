@@ -1,5 +1,6 @@
 main:
   timezone: Europe/Kiev
+  max_bytes_limit: 5e+7
   temp_dir_name: ds_reports  # will be created in your system temp folder unless "directory" is specified
 #  directory: /Users/Optima/Projects/ds_reports/data # use this for a specific folder
 

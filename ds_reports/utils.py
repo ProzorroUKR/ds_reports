@@ -4,6 +4,7 @@ from email.mime.text import MIMEText
 from email.utils import formatdate, COMMASPACE
 from swiftclient.service import SwiftService, SwiftUploadObject, Connection
 from swiftclient.exceptions import ClientException
+from zipfile import ZipFile
 from datetime import datetime, timedelta
 from os.path import basename
 from time import sleep
@@ -15,6 +16,47 @@ import os
 
 
 logger = logging.getLogger("DocReportsLogger")
+
+REPORT_EMAIL_SUBJECT = "DS Uploads Report for {month}"
+
+
+def send_reports_to_broker(email, name, email_config, directory, report_month, max_bytes_limit):
+    # split files according to the size limit
+    total = 0
+    current_chunk = []
+    chunks = [current_chunk]
+    for f in os.listdir(directory):
+        ff = "/".join((directory, f))
+        file_size = os.path.getsize(ff)
+
+        if current_chunk and (total + file_size) > max_bytes_limit:
+            total, current_chunk = 0, []
+            chunks.append(current_chunk)
+
+        total += file_size
+        current_chunk.append(ff)
+
+    # if report is about to be sent in multiple messages use numbers in subjects and attachment file names
+    zip_name = "{directory}-{month}.zip"
+    email_subject = REPORT_EMAIL_SUBJECT
+    if len(chunks) > 1:
+        zip_name = "{directory}-{month}-part-{num}.zip"
+        email_subject += " part {num}"
+
+    for n, chunk in enumerate(chunks):
+        chunk_num = n + 1
+        with ZipFile(zip_name.format(directory=directory, month=report_month, num=chunk_num), 'w') as zip_file:
+            for f in chunk:
+                zip_file.write(f, basename(f))
+
+        subject = email_subject.format(month=report_month, num=chunk_num)
+        send_mail(
+            to=email,
+            config=email_config,
+            subject=subject,
+            file_name=zip_file.filename,
+        )
+        logger.info('"{}" is sent to {}'.format(subject, name))
 
 
 def send_mail(to, config, subject, file_name):
