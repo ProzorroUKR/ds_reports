@@ -1,6 +1,5 @@
 #!/usr/local/bin/python
 from .utils import (
-    send_mail,
     get_swift_connection,
     get_files_from_swift_container,
     get_doc_logs_from_es,
@@ -8,6 +7,7 @@ from .utils import (
     ReportFilesManager,
     upload_files_to_swift,
     DirectoryLock,
+    send_reports_to_broker,
 )
 from datetime import datetime, timedelta
 import tempfile
@@ -17,7 +17,6 @@ import logging
 import logging.config
 import requests
 import zipfile
-import shutil
 import pytz
 import yaml
 import os
@@ -66,6 +65,9 @@ def get_config():
     config["main"]["send_from"] = send_from
     config["main"]["send_to"] = send_to
     config["main"]["send_month"] = str(send_from)[:7]
+
+    # max_bytes_limit
+    config["main"]["max_bytes_limit"] = float(config["main"]["max_bytes_limit"])
 
     # data containers
     if config["main"].get("directory") is None:
@@ -204,15 +206,14 @@ def send_reports():
                     full_name = os.path.join(tmp_dir, name)
                     if os.path.isdir(full_name):
                         if name in brokers_emails:
-                            archive_name = "{}-{}".format(full_name, main_config["send_month"])
-                            shutil.make_archive(archive_name, 'zip', full_name)
-                            send_mail(
-                                to=brokers_emails[name],
-                                config=config["email"],
-                                subject="DS Uploads Report for {}".format(main_config["send_month"]),
-                                file_name="{}.zip".format(archive_name)
+                            send_reports_to_broker(
+                                email=brokers_emails[name],
+                                name=name,
+                                email_config=config["email"],
+                                directory=full_name,
+                                report_month=main_config["send_month"],
+                                max_bytes_limit=main_config["max_bytes_limit"],
                             )
-                            logger.info("Email is sent to {}".format(name))
                         else:
                             logger.warning("Email address not found for {}".format(name))
 

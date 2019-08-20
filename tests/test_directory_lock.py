@@ -4,13 +4,6 @@ from time import sleep
 import unittest
 import os
 
-test_pre_qualification_procedures = (
-    'fake_qualification_pro',
-)
-test_qualification_procedures = (
-    'fake_pre_qualification_pro',
-)
-
 
 class DirectoryLockTestCase(unittest.TestCase):
 
