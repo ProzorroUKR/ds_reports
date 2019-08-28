@@ -4,10 +4,10 @@ from email.mime.text import MIMEText
 from email.utils import formatdate, COMMASPACE
 from swiftclient.service import SwiftService, SwiftUploadObject, Connection
 from swiftclient.exceptions import ClientException
-from zipfile import ZipFile
 from datetime import datetime, timedelta
 from os.path import basename
 from time import sleep
+import zipfile
 import logging
 import smtplib
 import requests
@@ -45,7 +45,11 @@ def send_reports_to_broker(email, name, email_config, directory, report_month, m
 
     for n, chunk in enumerate(chunks):
         chunk_num = n + 1
-        with ZipFile(zip_name.format(directory=directory, month=report_month, num=chunk_num), 'w') as zip_file:
+        with zipfile.ZipFile(
+            zip_name.format(directory=directory, month=report_month, num=chunk_num),
+            'w',
+            zipfile.ZIP_DEFLATED
+        ) as zip_file:
             for f in chunk:
                 zip_file.write(f, basename(f))
 

@@ -159,7 +159,7 @@ def sign_and_zip_file(file_name, sign_api_config):
                     f.write(response.content)
 
         # zipping two files in a single .zip
-        with zipfile.ZipFile(zip_file_name, "w") as zip:
+        with zipfile.ZipFile(zip_file_name, "w", zipfile.ZIP_DEFLATED) as zip:
             with zip.open(file_name.split("/")[-1], "w") as f:
                 f.write(open(file_name, "rb").read())
             with zip.open(sign_file_name.split("/")[-1], "w") as f:
