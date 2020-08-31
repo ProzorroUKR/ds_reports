@@ -18,6 +18,13 @@ import os
 logger = logging.getLogger("DocReportsLogger")
 
 REPORT_EMAIL_SUBJECT = "DS Uploads Report for {month}"
+JOURNAL_PREFIX = os.environ.get('JOURNAL_PREFIX', 'JOURNAL_')
+USER = JOURNAL_PREFIX + "USER"
+REMOTE_ADDR = JOURNAL_PREFIX + "REMOTE_ADDR"
+DOC_ID = JOURNAL_PREFIX + "DOC_ID"
+DOC_HASH = JOURNAL_PREFIX + "DOC_HASH"
+TIMESTAMP = JOURNAL_PREFIX + "TIMESTAMP"
+SOURCE_FIELDS = [USER, REMOTE_ADDR, DOC_ID, DOC_HASH, TIMESTAMP, "@timestamp"]
 
 
 def send_reports_to_broker(email, name, email_config, directory, report_month, max_bytes_limit):
@@ -165,9 +172,7 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                 },
                 "size": limit,
                 "sort": [{"@timestamp": {"order": "asc", "unmapped_type": "boolean"}}],
-                "_source": {"includes": [
-                    "USER", "REMOTE_ADDR", "DOC_ID", "DOC_HASH", "TIMESTAMP", "@timestamp",
-                ]},
+                "_source": {"includes": SOURCE_FIELDS},
             }
         )
         if search_after:
@@ -193,8 +198,8 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                 "Got {} hits after {}: from {} to {}".format(
                     len(hits),
                     search_after,
-                    hits[0]["_source"]["TIMESTAMP"],
-                    hits[-1]["_source"]["TIMESTAMP"]
+                    hits[0]["_source"][TIMESTAMP],
+                    hits[-1]["_source"][TIMESTAMP]
                 )
             )
             search_after = hits[-1]["sort"]
@@ -212,7 +217,7 @@ class ReportFilesManager:
         self.directory = directory
         self.suffix = suffix
         self.descriptors = {}
-        self.fields = ("TIMESTAMP", "DOC_ID", "DOC_HASH", "REMOTE_ADDR")
+        self.fields = (TIMESTAMP, DOC_ID, DOC_HASH, REMOTE_ADDR)
 
         ensure_dir_exists(self.directory)
 
@@ -228,7 +233,7 @@ class ReportFilesManager:
                 logger.exception(e)
 
     def write(self, data):
-        file_name = "{}-{}.csv".format(data["USER"], self.suffix)
+        file_name = "{}-{}.csv".format(data[USER], self.suffix)
         if file_name not in self.descriptors:
             full_name = os.path.join(self.directory, file_name)
             logger.info("New report file {}".format(full_name))

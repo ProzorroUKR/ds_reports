@@ -13,6 +13,9 @@ Setup
 3.
 See config.yaml and modify
 
+4.
+JOURNAL_PREFIX env var should be the same as in openprocurement.documentservice
+
 Three commands are available
 ----------------------------
 
