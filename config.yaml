@@ -12,6 +12,9 @@ sign_api:
 es:
   host: http://10.6.4.227:9200
   index: hpi-sandbox-*
+  username: test
+  password: test
+  journal_prefix: JOURNAL_
 
 swift:
   auth_version: 3

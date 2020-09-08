@@ -16,14 +16,12 @@ import os
 
 
 logger = logging.getLogger("DocReportsLogger")
-
 REPORT_EMAIL_SUBJECT = "DS Uploads Report for {month}"
-JOURNAL_PREFIX = os.environ.get('JOURNAL_PREFIX', 'JOURNAL_')
-USER = JOURNAL_PREFIX + "USER"
-REMOTE_ADDR = JOURNAL_PREFIX + "REMOTE_ADDR"
-DOC_ID = JOURNAL_PREFIX + "DOC_ID"
-DOC_HASH = JOURNAL_PREFIX + "DOC_HASH"
-TIMESTAMP = JOURNAL_PREFIX + "TIMESTAMP"
+USER = "{journal_prefix}USER"
+REMOTE_ADDR = "{journal_prefix}REMOTE_ADDR"
+DOC_ID = "{journal_prefix}DOC_ID"
+DOC_HASH = "{journal_prefix}DOC_HASH"
+TIMESTAMP = "{journal_prefix}TIMESTAMP"
 SOURCE_FIELDS = [USER, REMOTE_ADDR, DOC_ID, DOC_HASH, TIMESTAMP, "@timestamp"]
 
 
@@ -149,7 +147,8 @@ def upload_files_to_swift(files, config):
                     logger.error(r)
 
 
-def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10):
+def get_doc_logs_from_es(es_host, es_index, es_username, es_password, journal_prefix,
+                         start, end, limit=1000, wait_sec=10):
     search_after = None
 
     while True:
@@ -172,14 +171,16 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                 },
                 "size": limit,
                 "sort": [{"@timestamp": {"order": "asc", "unmapped_type": "boolean"}}],
-                "_source": {"includes": SOURCE_FIELDS},
+                "_source": {"includes": [field.format(journal_prefix=journal_prefix) for field in SOURCE_FIELDS]},
             }
         )
         if search_after:
             request_body[1]["search_after"] = search_after
         response = requests.post("{}/_msearch".format(es_host),
                                  data="\n".join(json.dumps(e) for e in request_body) + "\n",
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json"},
+                                 auth=(es_username, es_password),
+                                 verify=False)
         if response.status_code != 200:
             logger.error("Unexpected response {}:{}".format(response.status_code, response.text))
             sleep(wait_sec)
@@ -198,8 +199,8 @@ def get_doc_logs_from_es(es_host, es_index, start, end, limit=1000, wait_sec=10)
                 "Got {} hits after {}: from {} to {}".format(
                     len(hits),
                     search_after,
-                    hits[0]["_source"][TIMESTAMP],
-                    hits[-1]["_source"][TIMESTAMP]
+                    hits[0]["_source"][TIMESTAMP.format(journal_prefix=journal_prefix)],
+                    hits[-1]["_source"][TIMESTAMP.format(journal_prefix=journal_prefix)]
                 )
             )
             search_after = hits[-1]["sort"]
@@ -213,11 +214,13 @@ def ensure_dir_exists(name):
 
 class ReportFilesManager:
 
-    def __init__(self, directory,  suffix):
+    def __init__(self, directory,  suffix, journal_prefix):
         self.directory = directory
         self.suffix = suffix
         self.descriptors = {}
-        self.fields = (TIMESTAMP, DOC_ID, DOC_HASH, REMOTE_ADDR)
+        self.journal_prefix = journal_prefix
+        self.fields = (field.format(journal_prefix=journal_prefix)
+                       for field in (TIMESTAMP, DOC_ID, DOC_HASH, REMOTE_ADDR))
 
         ensure_dir_exists(self.directory)
 
@@ -233,7 +236,7 @@ class ReportFilesManager:
                 logger.exception(e)
 
     def write(self, data):
-        file_name = "{}-{}.csv".format(data[USER], self.suffix)
+        file_name = "{}-{}.csv".format(data[USER.format(self.journal_prefix)], self.suffix)
         if file_name not in self.descriptors:
             full_name = os.path.join(self.directory, file_name)
             logger.info("New report file {}".format(full_name))
