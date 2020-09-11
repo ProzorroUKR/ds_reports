@@ -236,7 +236,7 @@ class ReportFilesManager:
                 logger.exception(e)
 
     def write(self, data):
-        file_name = "{}-{}.csv".format(data[USER.format(self.journal_prefix)], self.suffix)
+        file_name = "{}-{}.csv".format(data[USER.format(journal_prefix=self.journal_prefix)], self.suffix)
         if file_name not in self.descriptors:
             full_name = os.path.join(self.directory, file_name)
             logger.info("New report file {}".format(full_name))
