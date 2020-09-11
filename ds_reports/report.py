@@ -95,8 +95,12 @@ def prepare_reports():
 
         # fill the directory with report files
         es_host, es_index = config["es"]["host"], config["es"]["index"]
-        with ReportFilesManager(main_config["directory"], str(main_config["start"].date())) as rf_manager:
-            for hit in get_doc_logs_from_es(es_host, es_index, main_config["start"], main_config["end"]):
+        es_username, es_password = config["es"]["username"], config["es"]["password"]
+        journal_prefix = config["es"]["journal_prefix"]
+        with ReportFilesManager(main_config["directory"], str(main_config["start"].date()), journal_prefix
+                                ) as rf_manager:
+            for hit in get_doc_logs_from_es(es_host, es_index, es_username, es_password, journal_prefix,
+                                            main_config["start"], main_config["end"]):
                 rf_manager.write(hit["_source"])
 
         _sign_reports_from_tmp_and_send(config)
